@@ -12,12 +12,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/DarkSide666/openid-connect-server.git",
-                "reference": "3e000a5879453423fd132e325f43f20368820eb1"
+                "reference": "9f6856d66f33abcf095578c0fb2738e865965973"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/DarkSide666/openid-connect-server/zipball/3e000a5879453423fd132e325f43f20368820eb1",
-                "reference": "3e000a5879453423fd132e325f43f20368820eb1",
+                "url": "https://api.github.com/repos/DarkSide666/openid-connect-server/zipball/9f6856d66f33abcf095578c0fb2738e865965973",
+                "reference": "9f6856d66f33abcf095578c0fb2738e865965973",
                 "shasum": ""
             },
             "require": {
@@ -49,7 +49,7 @@
                 "issues": "https://github.com/DarkSide666/openid-connect-server/issues",
                 "source": "https://github.com/DarkSide666/openid-connect-server/tree/develop"
             },
-            "time": "2026-11-22T20:26:50+00:00"
+            "time": "2026-11-22T20:36:13+00:00"
         },
         {
             "name": "defuse/php-encryption",

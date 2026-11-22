@@ -54,6 +54,17 @@ final class LogoutTokenValidatorTest extends TestCase
         $validator->validate($this->token(['events' => null, 'nonce' => 'forbidden']));
     }
 
+    public function testAcceptsFractionalNumericDateClaims(): void
+    {
+        $validator = new LogoutTokenValidator('https://op.example', 'rp-client', ['key-1' => $this->publicKey], new LogoutTokenStore($this->path));
+        $now = time();
+
+        self::assertSame(
+            ['sub' => 'subject-1', 'sid' => 'session-1'],
+            $validator->validate($this->token(['iat' => $now + 0.25, 'exp' => $now + 120.75]))
+        );
+    }
+
     /** @param array<string, mixed> $overrides */
     private function token(array $overrides = []): string
     {

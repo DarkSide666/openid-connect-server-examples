@@ -47,9 +47,13 @@ final readonly class LogoutTokenValidator
         $events = $claims->events ?? null;
         $eventName = 'http://schemas.openid.net/event/backchannel-logout';
         $now = time();
+        $issuedAt = $claims->iat ?? null;
+        $expiresAt = $claims->exp ?? null;
+        $validNumericDate = static fn (mixed $value): bool => (is_int($value) || is_float($value))
+            && is_finite((float) $value);
         if (($claims->iss ?? null) !== $this->issuer || !in_array($this->clientId, $audiences, true)
-            || !is_int($claims->iat ?? null) || $claims->iat > $now + 60
-            || !is_int($claims->exp ?? null) || $claims->exp <= $now || $claims->exp <= $claims->iat
+            || !$validNumericDate($issuedAt) || $issuedAt > $now + 60
+            || !$validNumericDate($expiresAt) || $expiresAt <= $now || $expiresAt <= $issuedAt
             || !is_string($claims->jti ?? null) || $claims->jti === '' || strlen($claims->jti) > 255 || isset($claims->nonce)
             || (isset($claims->sub) && (!is_string($claims->sub) || $claims->sub === '' || strlen($claims->sub) > 255))
             || (isset($claims->sid) && (!is_string($claims->sid) || $claims->sid === '' || strlen($claims->sid) > 255))
@@ -58,7 +62,7 @@ final readonly class LogoutTokenValidator
             || !$events instanceof \stdClass || !isset($events->$eventName) || !$events->$eventName instanceof \stdClass) {
             throw new RuntimeException('Logout Token claims are invalid.');
         }
-        if (!$this->replayStore->claim($this->issuer, $this->clientId, $claims->jti, $claims->exp)) {
+        if (!$this->replayStore->claim($this->issuer, $this->clientId, $claims->jti, (int) ceil($expiresAt))) {
             throw new RuntimeException('Logout Token replay detected.');
         }
         $result = [];
