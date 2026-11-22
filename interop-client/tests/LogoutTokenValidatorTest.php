@@ -65,6 +65,41 @@ final class LogoutTokenValidatorTest extends TestCase
         );
     }
 
+    public function testAcceptsUserWideLogoutWithoutSessionIdentifier(): void
+    {
+        $validator = new LogoutTokenValidator('https://op.example', 'rp-client', ['key-1' => $this->publicKey], new LogoutTokenStore($this->path));
+
+        self::assertSame(['sub' => 'subject-1'], $validator->validate($this->token(['sid' => null])));
+    }
+
+    public function testAcceptsSingleSessionLogoutWithoutSubject(): void
+    {
+        $validator = new LogoutTokenValidator('https://op.example', 'rp-client', ['key-1' => $this->publicKey], new LogoutTokenStore($this->path));
+
+        self::assertSame(['sid' => 'session-1'], $validator->validate($this->token(['sub' => null])));
+    }
+
+    public function testRejectsIncorrectAudience(): void
+    {
+        $validator = new LogoutTokenValidator('https://op.example', 'rp-client', ['key-1' => $this->publicKey], new LogoutTokenStore($this->path));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('claims are invalid');
+        $validator->validate($this->token(['aud' => 'another-client']));
+    }
+
+    public function testRejectsInvalidSignature(): void
+    {
+        $validator = new LogoutTokenValidator('https://op.example', 'rp-client', ['key-1' => $this->publicKey], new LogoutTokenStore($this->path));
+        $token = $this->token();
+        $parts = explode('.', $token);
+        $parts[1] = rtrim(strtr(base64_encode(json_encode(['iss' => 'https://op.example'], JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('signature');
+        $validator->validate(implode('.', $parts));
+    }
+
     /** @param array<string, mixed> $overrides */
     private function token(array $overrides = []): string
     {

@@ -44,4 +44,13 @@ final class LogoutTokenStoreTest extends TestCase
         $store->revokeSession('subject-1', null);
         self::assertTrue($store->isSessionRevoked('subject-1', 'session-2'));
     }
+
+    public function testUnknownSessionIdentifierDoesNotRevokeOtherSessions(): void
+    {
+        $store = new LogoutTokenStore($this->path);
+        $store->revokeSession('unknown-subject', 'unknown-session');
+
+        self::assertTrue($store->isSessionRevoked('unknown-subject', 'unknown-session'));
+        self::assertFalse($store->isSessionRevoked('known-subject', 'known-session'));
+    }
 }
