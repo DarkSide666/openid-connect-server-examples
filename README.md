@@ -33,10 +33,13 @@ composer analyse
 composer format:check
 ```
 
-Run the same commands from `interop-client/` for that project's checks. On Windows, set `OPENSSL_CONF`
-to the configuration shipped with your PHP installation if needed. In the shared development
-workspace, `_set_openssl_conf.cmd` is one directory above the two repositories; from either
-subproject directory, call it with `..\..\_set_openssl_conf.cmd` before Composer or PHP commands.
+Run the same commands from `interop-client/` for that project's checks. If Windows PHP needs an
+OpenSSL configuration, set `OPENSSL_CONF` in the command prompt before running Composer or PHP. For
+example:
+
+```cmd
+set OPENSSL_CONF=C:\path\to\php\extras\ssl\openssl.cnf
+```
 
 The library repository owns the live interoperability workflow. It checks out this examples
 repository, resolves the matching library branch through Packagist, starts the reference provider
