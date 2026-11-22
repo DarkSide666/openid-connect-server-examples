@@ -1,0 +1,50 @@
+{
+  "name": "darkside/openid-connect-server-reference-provider",
+  "description": "Test-only standalone reference OpenID Provider for DarkSide OpenID Connect Server.",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "darkside/openid-connect-server": "dev-main",
+    "slim/slim": "^4.14",
+    "slim/psr7": "^1.7"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5",
+    "phpstan/phpstan": "^2.1",
+    "friendsofphp/php-cs-fixer": "^3.0"
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../../openid-connect-server",
+      "options": {
+        "symlink": false,
+        "versions": {
+          "darkside/openid-connect-server": "dev-main"
+        }
+      }
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "DarkSide\\OidcReferenceProvider\\": "src/"
+    }
+  },
+  "scripts": {
+    "serve": "php -S 127.0.0.1:8080 -t public public/index.php",
+    "test": "phpunit",
+    "analyse": "phpstan analyse",
+    "format:check": "php-cs-fixer fix --dry-run --diff"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "config": {
+    "sort-packages": true
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "DarkSide\\OidcReferenceProvider\\Tests\\": "tests/"
+    }
+  }
+}

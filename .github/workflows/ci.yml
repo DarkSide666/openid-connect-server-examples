@@ -1,0 +1,39 @@
+name: Examples CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [reference-provider, interop-client]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: openid-connect-server-examples
+      - uses: actions/checkout@v4
+        with:
+          repository: darkside666/openid-connect-server
+          ref: main
+          path: openid-connect-server
+          token: ${{ secrets.LIBRARY_REPOSITORY_TOKEN || github.token }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Install dependencies
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer install --no-interaction --prefer-dist
+      - name: Test
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer test
+      - name: Analyse
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer analyse
+      - name: Check formatting
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer format:check

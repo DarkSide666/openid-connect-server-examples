@@ -1,0 +1,43 @@
+{
+  "name": "darkside/openid-connect-server-interop-client",
+  "description": "Independent OpenID Connect relying-party test client for the DarkSide OIDC reference provider.",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "jumbojett/openid-connect-php": "^1.0.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5",
+    "phpstan/phpstan": "^2.1",
+    "friendsofphp/php-cs-fixer": "^3.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "DarkSide\\OidcInteropClient\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "DarkSide\\OidcInteropClient\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": "phpunit",
+    "analyse": "phpstan analyse",
+    "format:check": "php-cs-fixer fix --dry-run --diff",
+    "check-provider": "php bin/check-provider.php",
+    "security-checks": "php bin/security-checks.php && php bin/authorization-flow-security-checks.php && php bin/token-id-token-security-checks.php",
+    "security-checks:authorization-flow": "php bin/authorization-flow-security-checks.php",
+    "security-checks:tokens": "php bin/token-id-token-security-checks.php",
+    "security-checks:rotation:prepare": "php bin/key-rotation-security-checks.php prepare",
+    "security-checks:rotation:verify": "php bin/key-rotation-security-checks.php verify"
+  },
+  "config": {
+    "sort-packages": true
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
