@@ -8,12 +8,15 @@ use InvalidArgumentException;
 
 final readonly class Config
 {
+    public string $postLogoutRedirectUri;
+
     public function __construct(
         public string $providerIssuer,
         public string $clientId,
         public string $clientSecret,
         public string $redirectUri,
         public ?string $caBundle = null,
+        ?string $postLogoutRedirectUri = null,
     ) {
         $allowInsecureHttpForCi = getenv('OIDC_INTEROP_ALLOW_INSECURE_HTTP_FOR_CI') === '1';
         self::assertOrigin($providerIssuer, 'OIDC_INTEROP_PROVIDER_ISSUER', $allowInsecureHttpForCi);
@@ -26,6 +29,8 @@ final readonly class Config
         if ($caBundle !== null && !is_file($caBundle)) {
             throw new InvalidArgumentException('OIDC_INTEROP_CA_BUNDLE does not point to an existing file.');
         }
+        $this->postLogoutRedirectUri = $postLogoutRedirectUri ?? self::defaultPostLogoutRedirectUri($redirectUri);
+        self::assertUrl($this->postLogoutRedirectUri, 'OIDC_INTEROP_POST_LOGOUT_REDIRECT_URI', $allowInsecureHttpForCi);
     }
 
     public static function fromEnvironment(): self
@@ -35,12 +40,30 @@ final readonly class Config
         $clientSecret = trim((string) getenv('OIDC_INTEROP_CLIENT_SECRET'));
         $redirectUri = trim((string) getenv('OIDC_INTEROP_REDIRECT_URI'));
         $caBundle = trim((string) getenv('OIDC_INTEROP_CA_BUNDLE'));
+        $postLogoutRedirectUri = trim((string) getenv('OIDC_INTEROP_POST_LOGOUT_REDIRECT_URI'));
 
         if ($issuer === '' || $clientId === '' || $clientSecret === '' || $redirectUri === '') {
             throw new InvalidArgumentException('Copy .env.example to .env and configure all required OIDC_INTEROP_* values.');
         }
 
-        return new self($issuer, $clientId, $clientSecret, $redirectUri, $caBundle !== '' ? $caBundle : null);
+        return new self(
+            $issuer,
+            $clientId,
+            $clientSecret,
+            $redirectUri,
+            $caBundle !== '' ? $caBundle : null,
+            $postLogoutRedirectUri !== '' ? $postLogoutRedirectUri : null,
+        );
+    }
+
+    private static function defaultPostLogoutRedirectUri(string $redirectUri): string
+    {
+        $parts = parse_url($redirectUri);
+        if (!is_array($parts) || !is_string($parts['scheme'] ?? null) || !is_string($parts['host'] ?? null)) {
+            throw new InvalidArgumentException('OIDC_INTEROP_REDIRECT_URI must be valid before deriving the post-logout URI.');
+        }
+        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+        return $parts['scheme'] . '://' . $parts['host'] . $port . '/signed-out';
     }
 
     private static function assertOrigin(string $url, string $name, bool $allowInsecureHttpForCi): void

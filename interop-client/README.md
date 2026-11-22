@@ -24,6 +24,12 @@ It is deliberately a separate Composer project and is not a runtime dependency o
    and validate issuer, audience, expiration, not-before and nonce when present.
 7. Additionally requires a nonce claim to be present and checks that the UserInfo `sub` exactly
    matches the verified ID Token `sub`.
+8. Uses the ID Token hint to start RP-Initiated Logout and validates the returned state at the exact
+   registered post-logout URI.
+9. Accepts Back-Channel Logout only after validating the signed Logout Token, its issuer/audience,
+   expiry, event claim and one-time `jti`; session-targeted logout is scoped by `sid`.
+10. When the provider enables protected registration, checks client creation, initial-access-token
+    enforcement and rejection of insecure redirect URIs.
 
 The client does not display or persist the access token or ID Token. It displays selected verified
 claims and the UserInfo response after a successful flow.
@@ -205,8 +211,9 @@ composer security-checks
 
 It performs live HTTPS checks for invalid client credentials, unknown/missing authorization codes,
 unsupported grant types, unauthenticated/invalid UserInfo requests, incorrect PKCE verifiers, and
-authorization-code reuse, and refresh-token issuance, rotation, replay rejection and family
-revocation after replay. The authorization-flow checks require the test-only account credentials
+authorization-code reuse, refresh-token issuance, rotation, replay rejection and family revocation,
+RP-Initiated Logout, and protected Dynamic Client Registration when enabled by the provider. The
+authorization-flow checks require the test-only account credentials
 from `reference-provider/.env` to be copied into `interop-client/.env`. See
 [`../docs/PHASE-6D-NEGATIVE-INTEROP-TESTING.md`](../docs/PHASE-6D-NEGATIVE-INTEROP-TESTING.md)
 for exact coverage and remaining limitations.

@@ -6,6 +6,7 @@ use League\OAuth2\Server\Exception\OAuthServerException;
 use Slim\Factory\AppFactory;
 use DarkSide\OidcReferenceProvider\Entity\User;
 use DarkSide\OidcReferenceProvider\ProviderFactory;
+use DarkSide\OpenIdConnectServer\Logout\RpInitiatedLogoutRequest;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 require dirname(__DIR__) . '/bootstrap.php';
@@ -46,6 +47,16 @@ $csrfToken = static function (): string {
     }
 
     return $_SESSION['csrf_token'];
+};
+
+$postLogoutUrisForClient = static function (?string $clientId) use ($services): array {
+    if ($clientId === null || hash_equals($services['clientId'], $clientId)) {
+        return [$services['postLogoutRedirectUri']];
+    }
+    $state = $services['dynamicClientState'];
+    $metadata = $state instanceof \DarkSide\OidcReferenceProvider\Storage\DynamicClientState ? $state->get($clientId) : null;
+    $uris = is_array($metadata) ? ($metadata['post_logout_redirect_uris'] ?? []) : [];
+    return is_array($uris) ? array_values(array_filter($uris, 'is_string')) : [];
 };
 
 $app->get('/health', static function ($request, $response) use ($sendJson) {
@@ -167,8 +178,103 @@ $app->post('/token', static function ($request, $response) use ($services) {
     }
 });
 
+$app->post('/register', static function ($request, $response) use ($services, $sendJson) {
+    $registration = $services['registration'];
+    if (!$registration instanceof \DarkSide\OpenIdConnectServer\Registration\ClientRegistrationService) {
+        return $sendJson($response, ['error' => 'not_found'], 404);
+    }
+    $body = $request->getParsedBody();
+    if (!is_array($body)) {
+        return $sendJson($response, ['error' => 'invalid_client_metadata'], 400);
+    }
+    $authorization = $request->getHeaderLine('Authorization');
+    $initialAccessToken = preg_match('/^Bearer\s+([^\s]+)$/i', $authorization, $matches) === 1 ? $matches[1] : null;
+    try {
+        $client = $registration->register($body, $initialAccessToken);
+        $payload = $client->metadata + ['client_id' => $client->clientId];
+        if ($client->clientSecret !== null) {
+            $payload['client_secret'] = $client->clientSecret;
+        }
+        $payload['client_id_issued_at'] = time();
+        $payload['client_secret_expires_at'] = 0;
+        return $sendJson($response, $payload, 201);
+    } catch (\InvalidArgumentException $exception) {
+        return $sendJson($response, ['error' => 'invalid_client_metadata'], 400);
+    } catch (\RuntimeException $exception) {
+        return $sendJson($response, ['error' => 'registration_not_permitted'], 403);
+    }
+});
+
 $app->map(['GET', 'POST'], '/userinfo', static function ($request, $response) use ($services) {
     return $services['userinfo']->handle($request, $response);
+});
+
+$app->get('/logout', static function ($request, $response) use ($services, $csrfToken, $sendJson, $postLogoutUrisForClient) {
+    try {
+        $logoutRequest = RpInitiatedLogoutRequest::fromQuery($request->getQueryParams());
+        $services['logout']->validate($logoutRequest, $postLogoutUrisForClient($logoutRequest->clientId));
+    } catch (\Throwable $exception) {
+        return $sendJson($response, ['error' => 'invalid_request', 'error_description' => $exception->getMessage()], 400);
+    }
+
+    $escape = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $csrf = $escape($csrfToken());
+    $hidden = '';
+    $parameters = [
+        'id_token_hint' => $logoutRequest->idTokenHint,
+        'client_id' => $logoutRequest->clientId,
+        'post_logout_redirect_uri' => $logoutRequest->postLogoutRedirectUri,
+        'state' => $logoutRequest->state,
+    ];
+    foreach ($parameters as $name => $value) {
+        if ($value !== null) {
+            $hidden .= '<input type="hidden" name="' . $name . '" value="' . $escape($value) . '">';
+        }
+    }
+    $response->getBody()->write('<!doctype html><html lang="en"><meta charset="utf-8"><title>Sign out</title><h1>Sign out</h1>'
+        . '<p>Confirm ending this test provider session.</p><form method="post" action="/logout">'
+        . '<input type="hidden" name="csrf_token" value="' . $csrf . '">' . $hidden
+        . '<button type="submit">Sign out</button></form></html>');
+    return $response->withHeader('Content-Type', 'text/html; charset=utf-8')->withHeader('Cache-Control', 'no-store');
+});
+
+$app->post('/logout', static function ($request, $response) use ($services, $csrfToken, $sendJson, $postLogoutUrisForClient) {
+    $body = $request->getParsedBody();
+    if (!is_array($body) || !is_string($body['csrf_token'] ?? null)
+        || !hash_equals($csrfToken(), $body['csrf_token'])) {
+        return $sendJson($response, ['error' => 'invalid_request'], 400);
+    }
+    try {
+        $logoutRequest = RpInitiatedLogoutRequest::fromQuery($body);
+        $result = $services['logout']->validate($logoutRequest, $postLogoutUrisForClient($logoutRequest->clientId));
+    } catch (\Throwable $exception) {
+        return $sendJson($response, ['error' => 'invalid_request', 'error_description' => $exception->getMessage()], 400);
+    }
+    if ($result['sub'] !== null
+        && (!is_string($_SESSION['oidc_subject'] ?? null) || !hash_equals($result['sub'], $_SESSION['oidc_subject'])
+            || !is_string($_SESSION['oidc_sid'] ?? null) || !is_string($result['sid'])
+            || !hash_equals($result['sid'], $_SESSION['oidc_sid']))) {
+        return $sendJson($response, ['error' => 'login_required', 'error_description' => 'The ID Token hint does not identify this browser session.'], 400);
+    }
+    if ($result['sub'] !== null && $services['backchannelLogout'] instanceof \DarkSide\OpenIdConnectServer\Logout\BackChannelLogoutService) {
+        try {
+            $services['backchannelLogout']->notify($result['sub'], $result['sid']);
+        } catch (\Throwable $exception) {
+            return $sendJson($response, ['error' => 'server_error', 'error_description' => 'Back-channel notification failed; session was not terminated.'], 502);
+        }
+    }
+
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $cookie = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $cookie['path'], $cookie['domain'], $cookie['secure'], $cookie['httponly']);
+    }
+    session_destroy();
+    $target = $result['post_logout_redirect_uri'] ?? '/';
+    if ($target !== '/' && $result['state'] !== null) {
+        $target .= (str_contains($target, '?') ? '&' : '?') . http_build_query(['state' => $result['state']], '', '&', PHP_QUERY_RFC3986);
+    }
+    return $response->withStatus(302)->withHeader('Location', $target)->withHeader('Cache-Control', 'no-store');
 });
 
 $app->run();

@@ -12,11 +12,13 @@ final class Client implements ClientEntityInterface
 {
     use EntityTrait;
 
+    /** @param list<string> $grantTypes */
     public function __construct(
         string $id,
         private string $name,
         private string $redirectUri,
         private bool $confidential = true,
+        private array $grantTypes = ['authorization_code', 'refresh_token'],
     ) {
         if ($id === '' || $name === '' || $redirectUri === '') {
             throw new InvalidArgumentException('Client identifier, name and redirect URI must not be empty.');
@@ -42,6 +44,6 @@ final class Client implements ClientEntityInterface
 
     public function supportsGrantType(string $grantType): bool
     {
-        return in_array($grantType, ['authorization_code', 'refresh_token'], true);
+        return in_array($grantType, $this->grantTypes, true);
     }
 }

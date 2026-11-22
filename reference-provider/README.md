@@ -5,9 +5,10 @@ This application is a deliberately small HTTPS host for exercising the
 without depending on any other production application or local library checkout.
 
 **It is a test fixture, not a production OpenID Provider. Do not expose it to real users, use real
-accounts, or use production signing keys.** Its single static client, test identity, file-backed
-repositories and deliberately limited login flow exist only to make the library independently
-runnable and suitable for protocol/interoperability experiments.
+accounts, or use production signing keys.** Its default static client, single test identity,
+file-backed repositories and deliberately limited login flow exist only to make the library
+independently runnable and suitable for protocol/interoperability experiments. Optional test-only
+dynamic registration can create additional clients when an initial access token is configured.
 
 ## What it exercises
 
@@ -17,6 +18,14 @@ test-only login/approval form.
 - `/token` — League token endpoint and the library's ID Token response extension.
 - `/jwks` — RS256 public signing key publication.
 - `/userinfo` — the library's Bearer-token-protected UserInfo handler.
+- `/logout` — RP-Initiated Logout with ID Token hint validation, CSRF-protected confirmation,
+  session binding and exact post-logout redirect allowlisting.
+- Optional Back-Channel Logout delivery to the configured RP HTTPS callback. The endpoint is
+  advertised only when `OIDC_REFERENCE_BACKCHANNEL_LOGOUT_URI` is configured.
+- Optional client creation at `/register`, advertised only when
+  `OIDC_REFERENCE_REGISTRATION_INITIAL_ACCESS_TOKEN` is configured. The example accepts only web
+  clients using the authorization-code grant and `client_secret_basic`; generated secrets are
+  returned once and stored as password hashes.
 - `offline_access` — rotating refresh tokens, explicit consent (`prompt=consent`), single-use
   refresh-token consumption and family revocation after reuse.
 - File-backed nonce metadata with atomic one-time consumption under a file lock.

@@ -21,6 +21,12 @@ final class DiagnosticOpenIDConnectClient extends OpenIDConnectClient
         return $this->claimValidationDiagnostics;
     }
 
+    public function endSessionEndpoint(): ?string
+    {
+        $endpoint = $this->getProviderConfigValue('end_session_endpoint');
+        return is_string($endpoint) && $endpoint !== '' ? $endpoint : null;
+    }
+
     protected function verifyJWTClaims($claims, ?string $accessToken = null): bool
     {
         $issuer = $claims->iss ?? null;
