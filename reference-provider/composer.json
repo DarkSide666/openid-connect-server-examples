@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "php": "^8.2",
-    "darkside/openid-connect-server": "dev-main",
+    "darkside/openid-connect-server": "develop",
     "slim/slim": "^4.14",
     "slim/psr7": "^1.7"
   },
@@ -14,18 +14,6 @@
     "phpstan/phpstan": "^2.1",
     "friendsofphp/php-cs-fixer": "^3.0"
   },
-  "repositories": [
-    {
-      "type": "path",
-      "url": "../../openid-connect-server",
-      "options": {
-        "symlink": false,
-        "versions": {
-          "darkside/openid-connect-server": "dev-main"
-        }
-      }
-    }
-  ],
   "autoload": {
     "psr-4": {
       "DarkSide\\OidcReferenceProvider\\": "src/"
