@@ -4,38 +4,41 @@ Test-only applications for [darkside/openid-connect-server](https://github.com/d
 
 | Project | Purpose |
 | --- | --- |
-| `reference-provider/` | Protocol fixture used by the live interoperability harness. |
-| `interop-client/` | Independent relying-party client and negative/security probes. |
+| `reference-provider/` | Test-only provider that exercises the library through OIDC endpoints over HTTPS. |
+| `interop-client/` | Independent relying-party client and live protocol/security probes. |
 
-These projects are not production identity providers or relying parties. They use static identities,
-test credentials, and file-backed storage. Generated `.env` files and `var/` directories are ignored.
+Neither project is a production identity provider or relying party. The reference provider uses a
+static identity, test credentials and file-backed storage. Generated `.env` files and `var/`
+directories are ignored.
 
-## Development layout
+## Composer dependency
 
-For local development, place both repositories next to each other:
+Each project has its own Composer configuration and should be installed from its own directory. The
+reference provider consumes [`darkside/openid-connect-server` from Packagist](https://packagist.org/packages/darkside/openid-connect-server); it does not require a
+sibling library checkout or a local path repository. Its development constraint accepts the
+`main` and `develop` branches for cross-repository testing. The committed lockfile pins the exact
+package commit used by a normal `composer install`.
 
-```text
-workspace/
-├── openid-connect-server/
-│   └── openid-connect-server/
-└── openid-connect-server-examples/
+The GitHub Actions workflows update that dependency to the corresponding `main` or `develop` branch
+before running provider checks. For an application derived from the reference provider, use a
+released library version from Packagist rather than a development branch.
+
+Install and check each project independently:
+
+```sh
+cd reference-provider
+composer install
+composer test
+composer analyse
+composer format:check
 ```
 
-The provider projects use a Composer path repository at `../../openid-connect-server`, so they test the
-current library checkout. For normal consumer use, replace `dev-main` with an appropriate released
-library constraint before distributing an application derived from an example.
+Run the same commands from `interop-client/` for that project's checks. On Windows, set `OPENSSL_CONF`
+to the configuration shipped with your PHP installation if needed. In the shared development
+workspace, `_set_openssl_conf.cmd` is one directory above the two repositories; from either
+subproject directory, call it with `..\..\_set_openssl_conf.cmd` before Composer or PHP commands.
 
-On Windows, call `_set_openssl_conf.cmd` before Composer or PHPUnit commands when the local OpenSSL
-installation requires `OPENSSL_CONF` to be set.
-
-## Checks
-
-Run each project’s `composer test`, `composer analyse`, and `composer format:check`. The library
-repository additionally owns the required live interoperability workflow, which checks out this
-repository and runs the reference provider plus independent RP checks against the candidate library.
-If the library repository is private, configure `LIBRARY_REPOSITORY_TOKEN` in this repository with
-read access so Examples CI can check it out.
-
-The `OIDC_*_ALLOW_INSECURE_HTTP_FOR_CI=1` settings are reserved for the ephemeral CI harness. They
-must never be used in local, staging, or production deployments; ordinary interop configuration
-requires HTTPS and certificate verification.
+The library repository owns the live interoperability workflow. It checks out this examples
+repository, resolves the matching library branch through Packagist, starts the reference provider
+behind a local HTTPS proxy, and runs the independent RP's live security probes. Examples CI runs each
+project's unit tests, PHPStan and formatting checks.
