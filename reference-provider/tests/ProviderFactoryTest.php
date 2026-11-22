@@ -59,8 +59,12 @@ final class ProviderFactoryTest extends TestCase
         self::assertSame('https://reference.example.test/token', $metadata['token_endpoint']);
         self::assertSame('https://reference.example.test/jwks', $metadata['jwks_uri']);
         self::assertSame('https://reference.example.test/userinfo', $metadata['userinfo_endpoint']);
+        self::assertSame('https://reference.example.test/logout', $metadata['end_session_endpoint']);
         self::assertSame(['code'], $metadata['response_types_supported']);
-        self::assertSame(['authorization_code'], $metadata['grant_types_supported']);
+        self::assertSame(['authorization_code', 'refresh_token'], $metadata['grant_types_supported']);
+        self::assertContains('offline_access', $metadata['scopes_supported']);
+        self::assertContains('sid', $metadata['claims_supported']);
+        self::assertArrayNotHasKey('registration_endpoint', $metadata);
         self::assertSame(['S256'], $metadata['code_challenge_methods_supported']);
         self::assertSame(['client_secret_basic'], $metadata['token_endpoint_auth_methods_supported']);
         self::assertSame('provider-test-client', $services['clientId']);
@@ -70,6 +74,25 @@ final class ProviderFactoryTest extends TestCase
         self::assertCount(1, $jwks['keys']);
         self::assertSame('reference-rs256-2026', $jwks['keys'][0]['kid']);
         self::assertArrayNotHasKey('d', $jwks['keys'][0]);
+    }
+
+    public function testDynamicRegistrationIsAdvertisedOnlyWhenProtectedAndCanCreateAClient(): void
+    {
+        $this->setEnvironment('OIDC_REFERENCE_REGISTRATION_INITIAL_ACCESS_TOKEN', 'registration-secret');
+        $services = (new ProviderFactory($this->directory))->create();
+        $metadata = $services['discovery']->generate();
+
+        self::assertSame('https://reference.example.test/register', $metadata['registration_endpoint']);
+        self::assertInstanceOf(\DarkSide\OpenIdConnectServer\Registration\ClientRegistrationService::class, $services['registration']);
+        $client = $services['registration']->register([
+            'client_name' => 'Test Dynamic RP',
+            'redirect_uris' => ['https://dynamic-rp.example.test/callback'],
+        ], 'registration-secret');
+        self::assertNotNull($client->clientSecret);
+        self::assertTrue($services['dynamicClientState']->validatesSecret($client->clientId, $client->clientSecret));
+
+        $this->expectException(\RuntimeException::class);
+        $services['registration']->register(['redirect_uris' => ['https://attacker.example.test/callback']], 'wrong-token');
     }
 
     private function writeKeyPair(string $prefix): void

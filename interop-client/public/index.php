@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 use DarkSide\OidcInteropClient\Config;
 use DarkSide\OidcInteropClient\DiagnosticOpenIDConnectClient;
+use DarkSide\OidcInteropClient\LogoutTokenStore;
+use DarkSide\OidcInteropClient\LogoutTokenValidator;
+use DarkSide\OidcInteropClient\RsaJwkConverter;
 
 require dirname(__DIR__) . '/bootstrap.php';
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -47,14 +50,100 @@ try {
         exit;
     }
 
+    if ($path === '/backchannel-logout') {
+        $body = file_get_contents('php://input');
+        parse_str(is_string($body) ? $body : '', $form);
+        $logoutToken = $form['logout_token'] ?? null;
+        if (!is_string($logoutToken) || $logoutToken === '') {
+            $respond('Invalid logout request', '<p>logout_token is required.</p>', 400);
+        }
+        $fetchJson = static function (string $url) use ($config): array {
+            $handle = curl_init($url);
+            if ($handle === false) {
+                throw new RuntimeException('Unable to initialize JWKS request.');
+            }
+            $curlOptions = [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 10,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_HTTPHEADER => ['Accept: application/json'],
+            ];
+            if ($config->caBundle !== null) {
+                $curlOptions[CURLOPT_CAINFO] = $config->caBundle;
+            }
+            curl_setopt_array($handle, $curlOptions);
+            $body = curl_exec($handle);
+            $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+            curl_close($handle);
+            $decoded = is_string($body) ? json_decode($body, true) : null;
+            if ($status !== 200 || !is_array($decoded)) {
+                throw new RuntimeException('Unable to retrieve provider signing keys.');
+            }
+            return $decoded;
+        };
+        try {
+            $metadata = $fetchJson($config->providerIssuer . '/.well-known/openid-configuration');
+            if (($metadata['issuer'] ?? null) !== $config->providerIssuer
+                || ($metadata['jwks_uri'] ?? null) !== $config->providerIssuer . '/jwks') {
+                throw new RuntimeException('Provider discovery does not match the configured issuer.');
+            }
+            $jwks = $fetchJson($metadata['jwks_uri']);
+            $keys = [];
+            foreach ($jwks['keys'] ?? [] as $jwk) {
+                if (is_array($jwk) && ($jwk['alg'] ?? null) === 'RS256' && is_string($jwk['kid'] ?? null)) {
+                    $keys[$jwk['kid']] = RsaJwkConverter::toPem($jwk);
+                }
+            }
+            $store = new LogoutTokenStore(dirname(__DIR__) . '/var/logout-state.json');
+            $claims = (new LogoutTokenValidator($config->providerIssuer, $config->clientId, $keys, $store))->validate($logoutToken);
+            $store->revokeSession($claims['sub'] ?? null, $claims['sid'] ?? null);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'accepted'], JSON_THROW_ON_ERROR);
+            exit;
+        } catch (Throwable) {
+            $respond('Invalid logout token', '<p>The Back-Channel Logout Token failed validation.</p>', 400);
+        }
+    }
+
     if ($path === '/logout') {
+        $idToken = $_SESSION['oidc_id_token'] ?? null;
+        if (!is_string($idToken) || $idToken === '') {
+            $respond('Already signed out', '<p>No OpenID Provider session is stored in this RP session.</p><p><a href="/">Return to the test client</a></p>');
+        }
+        $logoutClient = new DiagnosticOpenIDConnectClient($config->providerIssuer, $config->clientId, $config->clientSecret);
+        if ($config->caBundle !== null) {
+            $logoutClient->setCertPath($config->caBundle);
+        }
+        $endpoint = $logoutClient->endSessionEndpoint();
+        if ($endpoint === null) {
+            throw new RuntimeException('Provider discovery does not advertise end_session_endpoint.');
+        }
+        $state = bin2hex(random_bytes(32));
+        $_SESSION['oidc_logout_state'] = $state;
+        $query = http_build_query([
+            'id_token_hint' => $idToken,
+            'client_id' => $config->clientId,
+            'post_logout_redirect_uri' => $config->postLogoutRedirectUri,
+            'state' => $state,
+        ], '', '&', PHP_QUERY_RFC3986);
+        header('Location: ' . $endpoint . (str_contains($endpoint, '?') ? '&' : '?') . $query, true, 302);
+        exit;
+    }
+
+    if ($path === '/signed-out') {
+        $expectedState = $_SESSION['oidc_logout_state'] ?? null;
+        $returnedState = $_GET['state'] ?? null;
+        if (!is_string($expectedState) || !is_string($returnedState) || !hash_equals($expectedState, $returnedState)) {
+            $respond('Logout state error', '<p>The post-logout state is missing or invalid.</p><p><a href="/">Return</a></p>', 400);
+        }
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $params = session_get_cookie_params();
             setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
         }
         session_destroy();
-        $respond('Signed out', '<p>The relying-party test session has been cleared.</p><p><a href="/">Return to the test client</a></p>');
+        $respond('Signed out', '<p>The OpenID Provider and relying-party test sessions have been cleared.</p><p><a href="/">Return to the test client</a></p>');
     }
 
     if ($path === '/login' || $path === '/callback') {
@@ -98,6 +187,10 @@ try {
         if (!is_object($userInfo) || !is_string($userInfo->sub ?? null) || !hash_equals($claims->sub, $userInfo->sub)) {
             throw new RuntimeException('UserInfo sub does not match the ID Token sub.');
         }
+        $idToken = $oidc->getIdToken();
+        if (!is_string($idToken) || $idToken === '') {
+            throw new RuntimeException('The RP library did not retain the verified ID Token for logout.');
+        }
 
         $result = [
             'result' => 'success',
@@ -113,6 +206,9 @@ try {
             'userinfo' => get_object_vars($userInfo),
         ];
         $_SESSION['oidc_interop_success'] = true;
+        $_SESSION['oidc_id_token'] = $idToken;
+        $_SESSION['oidc_subject'] = $claims->sub;
+        $_SESSION['oidc_sid'] = is_string($claims->sid ?? null) ? $claims->sid : null;
         $json = json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $respond('OIDC interoperability successful', '<p>The independent relying-party library completed the Authorization Code flow, validated the ID Token signature and claims, and retrieved matching UserInfo.</p><pre>' . $escape($json) . '</pre><p><a href="/logout">Clear client session</a></p>');
     }
@@ -123,7 +219,16 @@ try {
 
     $issuer = $escape($config->providerIssuer);
     $redirect = $escape($config->redirectUri);
-    $status = isset($_SESSION['oidc_interop_success']) ? '<p>Previous login completed successfully in this browser session.</p>' : '';
+    $store = new LogoutTokenStore(dirname(__DIR__) . '/var/logout-state.json');
+    $subject = is_string($_SESSION['oidc_subject'] ?? null) ? $_SESSION['oidc_subject'] : null;
+    $sessionId = is_string($_SESSION['oidc_sid'] ?? null) ? $_SESSION['oidc_sid'] : null;
+    $remotelySignedOut = $store->isSessionRevoked($subject, $sessionId);
+    if ($remotelySignedOut) {
+        $_SESSION = [];
+    }
+    $status = $remotelySignedOut
+        ? '<p>The provider ended this RP session through Back-Channel Logout.</p>'
+        : (isset($_SESSION['oidc_interop_success']) ? '<p>Previous login completed successfully in this browser session.</p>' : '');
     $respond('Independent OIDC relying-party test client', $status
         . '<p>This application uses <code>jumbojett/openid-connect-php</code>, independently of the DarkSide OIDC Provider library.</p>'
         . '<ul><li>Provider issuer: <code>' . $issuer . '</code></li><li>Registered redirect URI: <code>' . $redirect . '</code></li>'

@@ -17,6 +17,18 @@ use DarkSide\OpenIdConnectServer\Key\VerificationKey;
 use DarkSide\OpenIdConnectServer\League\OidcAuthCodeGrant;
 use DarkSide\OpenIdConnectServer\League\OidcAuthCodeRepository;
 use DarkSide\OpenIdConnectServer\League\OidcBearerTokenResponse;
+use DarkSide\OpenIdConnectServer\League\OidcRefreshTokenGrant;
+use DarkSide\OpenIdConnectServer\Logout\IdTokenHintValidator;
+use DarkSide\OpenIdConnectServer\Logout\RpInitiatedLogoutService;
+use DarkSide\OpenIdConnectServer\Logout\BackChannelLogoutService;
+use DarkSide\OpenIdConnectServer\Logout\LogoutClientStoreInterface;
+use DarkSide\OpenIdConnectServer\Logout\LogoutTokenIssuer;
+use DarkSide\OpenIdConnectServer\Registration\ClientRegistrationService;
+use DarkSide\OidcReferenceProvider\Logout\HttpBackChannelLogoutDelivery;
+use DarkSide\OidcReferenceProvider\Registration\ReferenceClientRegistrationPolicy;
+use DarkSide\OidcReferenceProvider\Storage\DynamicClientState;
+use DarkSide\OpenIdConnectServer\Transaction\OidcSessionIdProviderInterface;
+use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use DarkSide\OpenIdConnectServer\Token\IdTokenIssuer;
 use DarkSide\OpenIdConnectServer\Transaction\OidcRequestContext;
 use DarkSide\OpenIdConnectServer\Transaction\RequestScopedOidcContextProvider;
@@ -35,7 +47,7 @@ final readonly class ProviderFactory
     {
     }
 
-    /** @return array{authorization: AuthorizationServer, userinfo: UserInfoEndpoint, discovery: DiscoveryDocumentGenerator, jwks: JwksGenerator, clientId: string, username: string, password: string, authenticationTimeStore: AuthenticationTimeStore, revocationStore: RevocationStore} */
+    /** @return array{authorization: AuthorizationServer, userinfo: UserInfoEndpoint, discovery: DiscoveryDocumentGenerator, jwks: JwksGenerator, clientId: string, username: string, password: string, authenticationTimeStore: AuthenticationTimeStore, revocationStore: RevocationStore, logout: RpInitiatedLogoutService, postLogoutRedirectUri: string, backchannelLogout: ?BackChannelLogoutService, registration: ?ClientRegistrationService, dynamicClientState: ?DynamicClientState} */
     public function create(): array
     {
         $baseUrl = rtrim((string) getenv('OIDC_REFERENCE_BASE_URL'), '/');
@@ -79,9 +91,12 @@ final readonly class ProviderFactory
         }
 
         $contextProvider = new RequestScopedOidcContextProvider(new OidcRequestContext());
-        $clientRepository = new ClientRepository($clientId, $clientSecret, $redirectUri);
+        $registrationToken = trim((string) getenv('OIDC_REFERENCE_REGISTRATION_INITIAL_ACCESS_TOKEN'));
+        $dynamicClientState = $registrationToken !== '' ? new DynamicClientState($dataDirectory . '/registered-clients.json') : null;
+        $clientRepository = new ClientRepository($clientId, $clientSecret, $redirectUri, $dynamicClientState);
         $scopeRepository = new ScopeRepository();
         $revocationStore = new RevocationStore($dataDirectory . '/revoked-access-tokens.json');
+        $refreshTokenRepository = new RefreshTokenRepository(new \DarkSide\OidcReferenceProvider\Storage\RefreshTokenState($dataDirectory . '/refresh-tokens.json'));
         $accessTokenRepository = new AccessTokenRepository($revocationStore);
         $authCodeRepository = new OidcAuthCodeRepository(
             new AuthCodeRepository(new RevocationStore($dataDirectory . '/revoked-authorization-codes.json')),
@@ -125,9 +140,45 @@ final readonly class ProviderFactory
             }
         }
         $signingKeySet = new SigningKeySet($signingKey, $retiredKeys);
+        $verificationKeys = [new VerificationKey($activeKeyId, $activePublic)];
+        foreach ($retiredKeys as $retiredKey) {
+            $verificationKeys[] = $retiredKey;
+        }
+        $redirectParts = parse_url($redirectUri);
+        if (!is_array($redirectParts) || !is_string($redirectParts['scheme'] ?? null) || !is_string($redirectParts['host'] ?? null)) {
+            throw new \RuntimeException('OIDC_REFERENCE_REDIRECT_URI must be a valid absolute URI.');
+        }
+        $redirectPort = isset($redirectParts['port']) ? ':' . $redirectParts['port'] : '';
+        $postLogoutRedirectUri = (string) (getenv('OIDC_REFERENCE_POST_LOGOUT_REDIRECT_URI')
+            ?: $redirectParts['scheme'] . '://' . $redirectParts['host'] . $redirectPort . '/signed-out');
         $idTokenLifetime = max(1, min(3600, (int) (getenv('OIDC_REFERENCE_ID_TOKEN_TTL_SECONDS') ?: 300)));
         $idTokenIssuer = new IdTokenIssuer($baseUrl, $signingKey, $idTokenLifetime);
         $tokenResponse = new OidcBearerTokenResponse($idTokenIssuer, $identityResolver, $contextProvider);
+        $backchannelLogoutUri = trim((string) getenv('OIDC_REFERENCE_BACKCHANNEL_LOGOUT_URI'));
+        $backchannelLogout = null;
+        if ($backchannelLogoutUri !== '') {
+            $logoutUriParts = parse_url($backchannelLogoutUri);
+            if (!is_array($logoutUriParts) || strtolower((string) ($logoutUriParts['scheme'] ?? '')) !== 'https'
+                || empty($logoutUriParts['host']) || isset($logoutUriParts['user']) || isset($logoutUriParts['pass'])
+                || isset($logoutUriParts['fragment'])) {
+                throw new \RuntimeException('OIDC_REFERENCE_BACKCHANNEL_LOGOUT_URI must be an absolute HTTPS URI without credentials or fragment.');
+            }
+            $logoutClients = new class ($clientId, $backchannelLogoutUri) implements LogoutClientStoreInterface {
+                public function __construct(private string $clientId, private string $logoutUri)
+                {
+                }
+
+                public function recipients(string $subject, ?string $sessionId): iterable
+                {
+                    yield ['client_id' => $this->clientId, 'logout_uri' => $this->logoutUri, 'session_required' => true];
+                }
+            };
+            $backchannelLogout = new BackChannelLogoutService(
+                $logoutClients,
+                new HttpBackChannelLogoutDelivery((string) (getenv('OIDC_REFERENCE_BACKCHANNEL_CA_BUNDLE') ?: '') ?: null),
+                new LogoutTokenIssuer($baseUrl, $signingKey),
+            );
+        }
 
         $authorization = new AuthorizationServer(
             $clientRepository,
@@ -138,8 +189,25 @@ final readonly class ProviderFactory
             $tokenResponse,
         );
         $authorization->enableGrantType(
-            new OidcAuthCodeGrant($authCodeRepository, new RefreshTokenRepository(), new DateInterval('PT5M'), $contextProvider),
-            new DateInterval('PT' . max(1, (int) (getenv('OIDC_REFERENCE_ACCESS_TOKEN_TTL_SECONDS') ?: 600)) . 'S'),
+            new OidcAuthCodeGrant(
+                $authCodeRepository,
+                $refreshTokenRepository,
+                new DateInterval('PT5M'),
+                $contextProvider,
+                true,
+                new class () implements OidcSessionIdProviderInterface {
+                    public function sessionId(AuthorizationRequestInterface $authorizationRequest): ?string
+                    {
+                        $sessionId = session_id();
+                        return is_string($sessionId) && $sessionId !== '' ? $sessionId : null;
+                    }
+                },
+            ),
+            $accessTokenTtl = new DateInterval('PT' . max(1, (int) (getenv('OIDC_REFERENCE_ACCESS_TOKEN_TTL_SECONDS') ?: 600)) . 'S'),
+        );
+        $authorization->enableGrantType(
+            new OidcRefreshTokenGrant($refreshTokenRepository, $contextProvider, new DateInterval('P30D')),
+            $accessTokenTtl,
         );
 
         $resourceServer = new ResourceServer($accessTokenRepository, $oauthPublicPath);
@@ -149,8 +217,14 @@ final readonly class ProviderFactory
             tokenEndpoint: $baseUrl . '/token',
             jwksUri: $baseUrl . '/jwks',
             userinfoEndpoint: $baseUrl . '/userinfo',
-            scopes: ['openid', 'profile', 'email'],
-            claims: ['iss', 'sub', 'aud', 'exp', 'iat', 'auth_time', 'nonce', 'name', 'preferred_username', 'email', 'email_verified'],
+            endSessionEndpoint: $baseUrl . '/logout',
+            scopes: ['openid', 'profile', 'email', 'offline_access'],
+            claims: ['iss', 'sub', 'aud', 'exp', 'iat', 'auth_time', 'nonce', 'sid', 'name', 'preferred_username', 'email', 'email_verified'],
+            grantTypes: ['authorization_code', 'refresh_token'],
+            offlineAccessSupported: true,
+            backchannelLogoutSupported: $backchannelLogout !== null,
+            backchannelLogoutSessionSupported: $backchannelLogout !== null,
+            registrationEndpoint: $dynamicClientState !== null ? $baseUrl . '/register' : null,
             tokenEndpointAuthMethods: ['client_secret_basic'],
         );
 
@@ -164,6 +238,13 @@ final readonly class ProviderFactory
             'password' => (string) getenv('OIDC_REFERENCE_TEST_PASSWORD'),
             'authenticationTimeStore' => $authenticationTimeStore,
             'revocationStore' => $revocationStore,
+            'logout' => new RpInitiatedLogoutService(new IdTokenHintValidator($baseUrl, $verificationKeys)),
+            'postLogoutRedirectUri' => $postLogoutRedirectUri,
+            'backchannelLogout' => $backchannelLogout,
+            'registration' => $dynamicClientState !== null
+                ? new ClientRegistrationService($dynamicClientState, new ReferenceClientRegistrationPolicy($registrationToken))
+                : null,
+            'dynamicClientState' => $dynamicClientState,
         ];
     }
 }

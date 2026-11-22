@@ -80,20 +80,22 @@ if ($discoveryResponse['status'] !== 200 || !is_array($discovery)
 }
 $authorizationEndpoint = $discovery['authorization_endpoint'];
 $tokenEndpoint = $discovery['token_endpoint'];
+$endSessionEndpoint = $discovery['end_session_endpoint'] ?? null;
 
-/** @return array{code: string, verifier: string} */
-$createAuthorizationCode = static function () use ($http, $config, $username, $password, $base64Url, $verifier, $authorizationEndpoint): array {
+/** @return array{code: string, verifier: string, session_cookie: string} */
+$createAuthorizationCode = static function (bool $offlineAccess = false) use ($http, $config, $username, $password, $base64Url, $verifier, $authorizationEndpoint): array {
     $codeVerifier = $verifier();
     $codeChallenge = $base64Url(hash('sha256', $codeVerifier, true));
     $query = http_build_query([
         'client_id' => $config->clientId,
         'response_type' => 'code',
         'redirect_uri' => $config->redirectUri,
-        'scope' => 'openid profile email',
+        'scope' => 'openid profile email' . ($offlineAccess ? ' offline_access' : ''),
         'state' => bin2hex(random_bytes(16)),
         'nonce' => bin2hex(random_bytes(16)),
         'code_challenge' => $codeChallenge,
         'code_challenge_method' => 'S256',
+        ...($offlineAccess ? ['prompt' => 'consent'] : []),
     ], '', '&', PHP_QUERY_RFC3986);
 
     $authorizationPage = $http('GET', $authorizationEndpoint . '?' . $query, ['Accept: text/html']);
@@ -119,11 +121,13 @@ $createAuthorizationCode = static function () use ($http, $config, $username, $p
     $locationParts = is_string($location) ? parse_url($location) : false;
     parse_str(is_array($locationParts) ? (string) ($locationParts['query'] ?? '') : '', $redirectQuery);
     $authorizationCode = $redirectQuery['code'] ?? null;
-    if ($loginResponse['status'] !== 302 || !is_string($authorizationCode) || $authorizationCode === '') {
+    $sessionCookie = $loginResponse['headers']['set-cookie'] ?? null;
+    if ($loginResponse['status'] !== 302 || !is_string($authorizationCode) || $authorizationCode === ''
+        || !is_string($sessionCookie) || $sessionCookie === '') {
         throw new RuntimeException('Provider did not return an authorization code. Check the test login credentials and provider logs.');
     }
 
-    return ['code' => $authorizationCode, 'verifier' => $codeVerifier];
+    return ['code' => $authorizationCode, 'verifier' => $codeVerifier, 'session_cookie' => explode(';', $sessionCookie, 2)[0]];
 };
 
 $redeem = static function (string $code, string $codeVerifier) use ($http, $tokenEndpoint, $formHeaders, $config): array {
@@ -168,11 +172,12 @@ try {
     $firstRedemption = $redeem($replayTransaction['code'], $replayTransaction['verifier']);
     $firstRedemptionSucceeded = $firstRedemption['status'] === 200
         && is_string($firstRedemption['payload']['access_token'] ?? null)
-        && is_string($firstRedemption['payload']['id_token'] ?? null);
+        && is_string($firstRedemption['payload']['id_token'] ?? null)
+        && !isset($firstRedemption['payload']['refresh_token']);
     $record(
         'A valid authorization code and PKCE verifier are accepted once',
         $firstRedemptionSucceeded,
-        'HTTP ' . $firstRedemption['status'] . '; access token and ID Token issued: ' . ($firstRedemptionSucceeded ? 'yes' : 'no'),
+        'HTTP ' . $firstRedemption['status'] . '; access token and ID Token issued without an unrequested refresh token: ' . ($firstRedemptionSucceeded ? 'yes' : 'no'),
     );
 
     if ($firstRedemptionSucceeded) {
@@ -188,6 +193,113 @@ try {
         );
     } else {
         $record('Token endpoint rejects reuse of a redeemed authorization code', false, 'Skipped because initial valid redemption failed.');
+    }
+
+    $offlineTransaction = $createAuthorizationCode(true);
+    $offlineTokens = $redeem($offlineTransaction['code'], $offlineTransaction['verifier']);
+    $initialRefreshToken = $offlineTokens['payload']['refresh_token'] ?? null;
+    $offlineSucceeded = $offlineTokens['status'] === 200
+        && is_string($offlineTokens['payload']['access_token'] ?? null)
+        && is_string($initialRefreshToken)
+        && $initialRefreshToken !== '';
+    $record(
+        'Explicitly consented offline_access authorization issues a refresh token',
+        $offlineSucceeded,
+        'HTTP ' . $offlineTokens['status'] . '; refresh token issued: ' . ($offlineSucceeded ? 'yes' : 'no'),
+    );
+
+    if ($offlineSucceeded) {
+        $refresh = static function (string $token) use ($http, $tokenEndpoint, $formHeaders): array {
+            $response = $http('POST', $tokenEndpoint, $formHeaders, http_build_query([
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $token,
+            ], '', '&', PHP_QUERY_RFC3986));
+            $payload = json_decode($response['body'], true);
+            return ['status' => $response['status'], 'payload' => is_array($payload) ? $payload : []];
+        };
+        $rotated = $refresh($initialRefreshToken);
+        $replacement = $rotated['payload']['refresh_token'] ?? null;
+        $rotationSucceeded = $rotated['status'] === 200 && is_string($replacement)
+            && $replacement !== '' && !hash_equals($initialRefreshToken, $replacement);
+        $record(
+            'Refresh-token grant rotates the token after successful client authentication',
+            $rotationSucceeded,
+            'HTTP ' . $rotated['status'] . '; replacement token issued: ' . ($rotationSucceeded ? 'yes' : 'no'),
+        );
+
+        $replay = $refresh($initialRefreshToken);
+        $replayRejected = $replay['status'] === 400 && ($replay['payload']['error'] ?? null) === 'invalid_grant';
+        $record(
+            'Refresh-token reuse is rejected',
+            $replayRejected,
+            'HTTP ' . $replay['status'] . '; OAuth error: ' . (is_string($replay['payload']['error'] ?? null) ? $replay['payload']['error'] : 'missing'),
+        );
+
+        if ($rotationSucceeded) {
+            $familyCheck = $refresh($replacement);
+            $familyRevoked = $familyCheck['status'] === 400 && ($familyCheck['payload']['error'] ?? null) === 'invalid_grant';
+            $record(
+                'Reusing a spent refresh token revokes its replacement token family',
+                $familyRevoked,
+                'Replacement token after replay: HTTP ' . $familyCheck['status'] . '; OAuth error: ' . (is_string($familyCheck['payload']['error'] ?? null) ? $familyCheck['payload']['error'] : 'missing'),
+            );
+        } else {
+            $record('Reusing a spent refresh token revokes its replacement token family', false, 'Skipped because initial rotation failed.');
+        }
+    } else {
+        $record('Refresh-token grant rotates the token after successful client authentication', false, 'Skipped because offline access did not issue a refresh token.');
+        $record('Refresh-token reuse is rejected', false, 'Skipped because offline access did not issue a refresh token.');
+        $record('Reusing a spent refresh token revokes its replacement token family', false, 'Skipped because offline access did not issue a refresh token.');
+    }
+    if (is_string($endSessionEndpoint) && $endSessionEndpoint !== '') {
+        $logoutTransaction = $createAuthorizationCode();
+        $logoutTokens = $redeem($logoutTransaction['code'], $logoutTransaction['verifier']);
+        $logoutIdToken = $logoutTokens['payload']['id_token'] ?? null;
+        if ($logoutTokens['status'] === 200 && is_string($logoutIdToken) && $logoutIdToken !== '') {
+            $logoutState = bin2hex(random_bytes(24));
+            $logoutParameters = [
+                'id_token_hint' => $logoutIdToken,
+                'client_id' => $config->clientId,
+                'post_logout_redirect_uri' => $config->postLogoutRedirectUri,
+                'state' => $logoutState,
+            ];
+            $logoutPage = $http('GET', $endSessionEndpoint . '?' . http_build_query($logoutParameters, '', '&', PHP_QUERY_RFC3986), [
+                'Accept: text/html',
+                'Cookie: ' . $logoutTransaction['session_cookie'],
+            ]);
+            $csrf = null;
+            if (preg_match('/name="csrf_token" value="([a-f0-9]+)"/i', $logoutPage['body'], $csrfMatch)) {
+                $csrf = $csrfMatch[1];
+            }
+            if ($logoutPage['status'] === 200 && is_string($csrf)) {
+                $logoutResponse = $http('POST', $endSessionEndpoint, [
+                    'Accept: text/html',
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . $logoutTransaction['session_cookie'],
+                ], http_build_query($logoutParameters + ['csrf_token' => $csrf], '', '&', PHP_QUERY_RFC3986));
+                $location = $logoutResponse['headers']['location'] ?? '';
+                $locationParts = parse_url($location);
+                $expectedParts = parse_url($config->postLogoutRedirectUri);
+                parse_str(is_array($locationParts) ? (string) ($locationParts['query'] ?? '') : '', $returnedQuery);
+                $logoutSucceeded = $logoutResponse['status'] === 302
+                    && is_array($locationParts) && is_array($expectedParts)
+                    && ($locationParts['scheme'] ?? null) === ($expectedParts['scheme'] ?? null)
+                    && ($locationParts['host'] ?? null) === ($expectedParts['host'] ?? null)
+                    && ($locationParts['path'] ?? null) === ($expectedParts['path'] ?? null)
+                    && ($returnedQuery['state'] ?? null) === $logoutState;
+                $record(
+                    'RP-Initiated Logout validates the session and returns state to the registered URI',
+                    $logoutSucceeded,
+                    'POST /logout returned HTTP ' . $logoutResponse['status'] . '; registered URI and state preserved: ' . ($logoutSucceeded ? 'yes' : 'no'),
+                );
+            } else {
+                $record('RP-Initiated Logout validates the session and returns state to the registered URI', false, 'Provider logout confirmation did not load successfully.');
+            }
+        } else {
+            $record('RP-Initiated Logout validates the session and returns state to the registered URI', false, 'Could not obtain an ID Token for the logout probe.');
+        }
+    } else {
+        $record('RP-Initiated Logout validates the session and returns state to the registered URI', false, 'Discovery does not advertise end_session_endpoint.');
     }
 } catch (Throwable $exception) {
     fwrite(STDERR, 'Authorization-flow security checks could not complete: ' . $exception->getMessage() . "\n");

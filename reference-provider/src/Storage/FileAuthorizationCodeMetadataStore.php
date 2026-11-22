@@ -30,6 +30,7 @@ final readonly class FileAuthorizationCodeMetadataStore implements Authorization
                     'nonce' => $metadata->nonce,
                     'expires_at' => $metadata->expiresAt->getTimestamp(),
                     'max_age' => $metadata->maxAge,
+                    'session_id' => $metadata->sessionId,
                 ];
             },
         );
@@ -50,8 +51,14 @@ final readonly class FileAuthorizationCodeMetadataStore implements Authorization
                     return null;
                 }
                 $maxAge = $record['max_age'] ?? null;
+                $sessionId = $record['session_id'] ?? null;
 
-                return new AuthorizationCodeMetadata($record['nonce'], $expiresAt, is_int($maxAge) ? $maxAge : null);
+                return new AuthorizationCodeMetadata(
+                    $record['nonce'],
+                    $expiresAt,
+                    is_int($maxAge) ? $maxAge : null,
+                    is_string($sessionId) ? $sessionId : null,
+                );
             },
         );
     }

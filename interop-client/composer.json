@@ -29,7 +29,7 @@
     "analyse": "phpstan analyse",
     "format:check": "php-cs-fixer fix --dry-run --diff",
     "check-provider": "php bin/check-provider.php",
-    "security-checks": "php bin/security-checks.php && php bin/authorization-flow-security-checks.php && php bin/token-id-token-security-checks.php",
+    "security-checks": "php bin/security-checks.php && php bin/authorization-flow-security-checks.php && php bin/token-id-token-security-checks.php && php bin/registration-security-checks.php",
     "security-checks:authorization-flow": "php bin/authorization-flow-security-checks.php",
     "security-checks:tokens": "php bin/token-id-token-security-checks.php",
     "security-checks:rotation:prepare": "php bin/key-rotation-security-checks.php prepare",

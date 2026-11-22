@@ -127,7 +127,7 @@ $unsupportedGrant = $http('POST', $tokenUrl, [...$formHeaders, $basic($config->c
 ]));
 $unsupportedGrantError = $decodeError($unsupportedGrant);
 $record(
-    'Token endpoint rejects the unsupported refresh-token grant',
+    'Token endpoint rejects an invalid refresh token',
     $unsupportedGrant['status'] === 400 && $unsupportedGrantError !== null,
     'HTTP ' . $unsupportedGrant['status'] . '; OAuth error: ' . ($unsupportedGrantError ?? 'missing'),
 );

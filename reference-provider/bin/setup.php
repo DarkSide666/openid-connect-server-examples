@@ -52,6 +52,7 @@ if (!is_file($envPath)) {
         'OIDC_REFERENCE_CLIENT_ID=oidc-test-client',
         'OIDC_REFERENCE_CLIENT_SECRET=' . $clientSecret,
         'OIDC_REFERENCE_REDIRECT_URI=https://oidc-client.loc/callback',
+        'OIDC_REFERENCE_POST_LOGOUT_REDIRECT_URI=https://oidc-client.loc/signed-out',
         'OIDC_REFERENCE_TEST_USERNAME=alice',
         'OIDC_REFERENCE_TEST_PASSWORD=' . $testPassword,
         'OIDC_REFERENCE_DATA_DIR=var',
