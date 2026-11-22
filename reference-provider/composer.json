@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "php": "^8.2",
-    "darkside/openid-connect-server": "develop",
+    "darkside/openid-connect-server": "dev-develop",
     "slim/slim": "^4.14",
     "slim/psr7": "^1.7"
   },
