@@ -4,15 +4,21 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "87e07589f438ad4ba17de052c12c7f01",
+    "content-hash": "9db5418b6bb48f40900d90ea2ad377db",
     "packages": [
         {
             "name": "darkside/openid-connect-server",
-            "version": "dev-main",
+            "version": "dev-develop",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/DarkSide666/openid-connect-server.git",
+                "reference": "e5c281572b8986281e4e267f765c62831499a53f"
+            },
             "dist": {
-                "type": "path",
-                "url": "../../openid-connect-server",
-                "reference": "bd8980e4d1e6b9f476088d2dc7bced990c981f17"
+                "type": "zip",
+                "url": "https://api.github.com/repos/DarkSide666/openid-connect-server/zipball/e5c281572b8986281e4e267f765c62831499a53f",
+                "reference": "e5c281572b8986281e4e267f765c62831499a53f",
+                "shasum": ""
             },
             "require": {
                 "ext-json": "*",
@@ -27,36 +33,23 @@
                 "phpstan/phpstan": "^2.1",
                 "phpunit/phpunit": "^11.5"
             },
+            "default-branch": true,
             "type": "library",
             "autoload": {
                 "psr-4": {
                     "DarkSide\\OpenIdConnectServer\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "DarkSide\\OpenIdConnectServer\\Tests\\": "tests/"
-                }
-            },
-            "scripts": {
-                "test": [
-                    "phpunit"
-                ],
-                "analyse": [
-                    "phpstan analyse"
-                ],
-                "format:check": [
-                    "php-cs-fixer fix --dry-run --diff"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
             "description": "Framework-independent OpenID Connect Provider components for PHP, built to integrate with League OAuth2 Server.",
-            "transport-options": {
-                "symlink": false,
-                "relative": true
-            }
+            "support": {
+                "issues": "https://github.com/DarkSide666/openid-connect-server/issues",
+                "source": "https://github.com/DarkSide666/openid-connect-server/tree/develop"
+            },
+            "time": "2026-11-22T14:10:34+00:00"
         },
         {
             "name": "defuse/php-encryption",

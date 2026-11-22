@@ -103,13 +103,13 @@ Create a second HTTPS VirtualHost for the RP. Its `DocumentRoot` must point to t
 ```apache
 <VirtualHost *:443>
     ServerName oidc-client.loc
-    DocumentRoot "C:/wamp64/www/DarkSide666/oidc-provider/oidc-server/interop-client/public"
+    DocumentRoot "C:/path/to/openid-connect-server-examples/interop-client/public"
 
     SSLEngine on
     SSLCertificateFile "C:/path/to/certificate-with-oidc-client.loc-SAN.crt"
     SSLCertificateKeyFile "C:/path/to/certificate.key"
 
-    <Directory "C:/wamp64/www/DarkSide666/oidc-provider/oidc-server/interop-client/public">
+    <Directory "C:/path/to/openid-connect-server-examples/interop-client/public">
         Options FollowSymLinks
         AllowOverride All
         Require local

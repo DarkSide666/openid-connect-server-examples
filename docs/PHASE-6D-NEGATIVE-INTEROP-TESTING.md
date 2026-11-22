@@ -35,25 +35,32 @@ For these flow checks, configure `OIDC_INTEROP_TEST_USERNAME` and
 `reference-provider/.env`. The script performs the login form POST over verified HTTPS, carries the
 provider session cookie, and does not follow redirects automatically.
 
-The scripts print only HTTP status codes, OAuth error identifiers and whether token fields were
-returned. They never print credentials, access tokens, ID Tokens, authorization codes, or response
-bodies.
+The scripts print status codes, OAuth error identifiers and non-secret check details. They never
+print credentials, access tokens, ID Tokens, authorization codes, or response bodies.
 
-A passing result is evidence for these exact negative cases only; it is not a complete OIDC
-conformance or security certification.
+The combined command also runs `bin/token-id-token-security-checks.php`. It obtains authorization
+codes and checks that the provider echoes state correctly and includes the exact requested nonce in
+the ID Token. It also checks UserInfo behavior for revoked and expired access tokens, verifies a real
+RS256 ID Token signature against the published JWKS, confirms a modified signature does not verify,
+and checks issuer/audience claim policies in the harness.
 
-## Remaining scenarios
+A passing result is evidence only for the listed checks; it is not a complete OIDC conformance or
+security certification.
 
-The following scenarios remain outside the automated checks in this phase:
+## Limits of the current checks
 
-- Confirm that the independent RP rejects a token whose signature is modified, whose signing key is
-  unknown, or whose issuer/audience is wrong. These are RP-side validation tests; do not weaken the
-  real provider's validation to manufacture a pass.
-- Confirm the provider rejects an expired or revoked access token at UserInfo. An unknown token is
-  covered automatically; expiration/revocation requires a token that was once valid.
+- The tampered-signature check independently verifies that the altered signature fails cryptographic
+  verification. It does not feed a forged token through the browser RP library.
+- The unknown-`kid` check confirms the test identifier is not published in provider JWKS; it does not
+  test the RP library's behavior when a token refers to an unknown key.
+- Wrong-issuer and wrong-audience checks exercise the harness's claim-policy predicate. They are not
+  provider-signed tokens passed through the independent RP's validator.
 
-Existing library-level regression tests cover the provider's ID Token claim validation and UserInfo
-scope/token-validation behavior, but do not substitute for the live HTTP scenarios above.
+The live browser flow does exercise the independent RP's validation of a genuine ID Token, including
+signature, issuer, audience, expiry, not-before and nonce, plus UserInfo subject consistency. It does
+not currently run forged-token rejection cases through that RP. Existing library-level regression
+tests cover provider-side ID Token claim validation and UserInfo scope/token-validation behavior,
+but do not substitute for the live HTTP scenarios above.
 
 ## Test boundary
 

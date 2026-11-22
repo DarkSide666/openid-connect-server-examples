@@ -3,6 +3,9 @@ name: Examples CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '37 5 * * 1'
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -12,15 +15,21 @@ jobs:
       matrix:
         project: [reference-provider, interop-client]
     steps:
+      - name: Select library branch
+        id: library-ref
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.LIBRARY_REPOSITORY_TOKEN || github.token }}
+          CANDIDATE_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          if [[ ("$CANDIDATE_BRANCH" == "main" || "$CANDIDATE_BRANCH" == "develop") ]] && git ls-remote --exit-code --heads "https://x-access-token:${GH_TOKEN}@github.com/darkside666/openid-connect-server.git" "refs/heads/$CANDIDATE_BRANCH" >/dev/null 2>&1; then
+            echo "ref=$CANDIDATE_BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
         with:
           path: openid-connect-server-examples
-      - uses: actions/checkout@v4
-        with:
-          repository: darkside666/openid-connect-server
-          ref: main
-          path: openid-connect-server
-          token: ${{ secrets.LIBRARY_REPOSITORY_TOKEN || github.token }}
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
@@ -28,6 +37,54 @@ jobs:
       - name: Install dependencies
         working-directory: openid-connect-server-examples/${{ matrix.project }}
         run: composer install --no-interaction --prefer-dist
+      - name: Update reference provider to the matching library branch
+        if: matrix.project == 'reference-provider'
+        working-directory: openid-connect-server-examples/reference-provider
+        run: composer update darkside/openid-connect-server --with darkside/openid-connect-server:dev-${{ steps.library-ref.outputs.ref }} --no-interaction --prefer-dist
+      - name: Test
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer test
+      - name: Analyse
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer analyse
+      - name: Check formatting
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer format:check
+
+  latest-dependencies:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [reference-provider, interop-client]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: openid-connect-server-examples
+      - name: Select library branch
+        id: library-ref
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.LIBRARY_REPOSITORY_TOKEN || github.token }}
+          CANDIDATE_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ ("$CANDIDATE_BRANCH" == "main" || "$CANDIDATE_BRANCH" == "develop") ]] && git ls-remote --exit-code --heads "https://x-access-token:${GH_TOKEN}@github.com/darkside666/openid-connect-server.git" "refs/heads/$CANDIDATE_BRANCH" >/dev/null 2>&1; then
+            echo "ref=$CANDIDATE_BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Update dependencies
+        working-directory: openid-connect-server-examples/${{ matrix.project }}
+        run: composer update --no-interaction --prefer-dist
+      - name: Update reference provider to the matching library branch
+        if: matrix.project == 'reference-provider'
+        working-directory: openid-connect-server-examples/reference-provider
+        run: composer update darkside/openid-connect-server --with darkside/openid-connect-server:dev-${{ steps.library-ref.outputs.ref }} --no-interaction --prefer-dist
       - name: Test
         working-directory: openid-connect-server-examples/${{ matrix.project }}
         run: composer test

@@ -1,7 +1,8 @@
-# Standalone OIDC Reference Provider (test-only)
+# OIDC Reference Provider (test-only)
 
-This application is a deliberately small HTTP host for exercising `darkside/openid-connect-server`
-without depending on any other production application.
+This application is a deliberately small HTTPS host for exercising the
+[`darkside/openid-connect-server` Packagist package](https://packagist.org/packages/darkside/openid-connect-server)
+without depending on any other production application or local library checkout.
 
 **It is a test fixture, not a production OpenID Provider. Do not expose it to real users, use real
 accounts, or use production signing keys.** Its single static client, test identity, file-backed
@@ -72,13 +73,13 @@ Configure an HTTPS VirtualHost in WAMP Apache, using your actual certificate and
 ```apache
 <VirtualHost *:443>
     ServerName oidc-reference.loc
-    DocumentRoot "C:/wamp64/www/DarkSide666/oidc-provider/oidc-server/reference-provider/public"
+    DocumentRoot "C:/path/to/openid-connect-server-examples/reference-provider/public"
 
     SSLEngine on
     SSLCertificateFile "C:/path/to/certificate-with-oidc-reference.loc-SAN.crt"
     SSLCertificateKeyFile "C:/path/to/certificate.key"
 
-    <Directory "C:/wamp64/www/DarkSide666/oidc-provider/oidc-server/reference-provider/public">
+    <Directory "C:/path/to/openid-connect-server-examples/reference-provider/public">
         Options FollowSymLinks
         AllowOverride All
         Require local
@@ -108,7 +109,7 @@ required when WAMP Apache serves the HTTPS VirtualHost directly.
 
 ## Test client configuration
 
-The sibling [`interop-client/`](../interop-client/README.md) is preconfigured to use the reference client profile. Its redirect URI must match `OIDC_REFERENCE_REDIRECT_URI`.
+The sibling [`interop-client/`](../interop-client/README.md) is preconfigured to use the reference client profile. Its redirect URI must match `OIDC_REFERENCE_REDIRECT_URI`. The browser-based RP flow requires an HTTPS virtual host for the RP callback. The command-line security probes process redirects themselves and do not require a separate callback listener.
 
 Do not weaken redirect URI validation to accommodate a client callback.
 

@@ -91,13 +91,15 @@ if ($jwksResponse['status'] !== 200 || !is_array($jwks) || !is_array($jwks['keys
     exit(2);
 }
 
-/** @return array{code: string, verifier: string} */
+/** @return array{code: string, verifier: string, nonce: string, state: string} */
 $createAuthorizationCode = static function () use ($http, $config, $username, $password, $base64Url, $authorizationEndpoint): array {
     $verifier = $base64Url(random_bytes(32));
     $challenge = $base64Url(hash('sha256', $verifier, true));
+    $nonce = bin2hex(random_bytes(16));
+    $state = bin2hex(random_bytes(16));
     $query = http_build_query([
         'client_id' => $config->clientId, 'response_type' => 'code', 'redirect_uri' => $config->redirectUri,
-        'scope' => 'openid profile email', 'state' => bin2hex(random_bytes(16)), 'nonce' => bin2hex(random_bytes(16)),
+        'scope' => 'openid profile email', 'state' => $state, 'nonce' => $nonce,
         'code_challenge' => $challenge, 'code_challenge_method' => 'S256',
     ], '', '&', PHP_QUERY_RFC3986);
     $page = $http('GET', $authorizationEndpoint . '?' . $query, ['Accept: text/html']);
@@ -113,13 +115,15 @@ $createAuthorizationCode = static function () use ($http, $config, $username, $p
     $parts = parse_url($location);
     parse_str(is_array($parts) ? (string) ($parts['query'] ?? '') : '', $queryValues);
     $code = $queryValues['code'] ?? null;
-    if ($login['status'] !== 302 || !is_string($code) || $code === '') {
+    if ($login['status'] !== 302 || !is_string($code) || $code === '' || ($queryValues['state'] ?? null) !== $state) {
         throw new RuntimeException('Provider did not issue an authorization code.');
     }
-    return ['code' => $code, 'verifier' => $verifier];
+    return ['code' => $code, 'verifier' => $verifier, 'nonce' => $nonce, 'state' => $state];
 };
 
-/** @return array{status: int, payload: array<string, mixed>} */
+/** @param array{code: string, verifier: string, nonce: string, state: string} $transaction
+ *  @return array{status: int, payload: array<string, mixed>}
+ */
 $redeem = static function (array $transaction) use ($http, $tokenEndpoint, $formHeaders, $config): array {
     $response = $http('POST', $tokenEndpoint, $formHeaders, http_build_query([
         'grant_type' => 'authorization_code', 'code' => $transaction['code'],
@@ -243,6 +247,12 @@ try {
         'The issued ID Token has the configured issuer and client audience',
         $issuerValid && $audienceValid,
         'issuer matches: ' . ($issuerValid ? 'yes' : 'no') . '; audience contains client: ' . ($audienceValid ? 'yes' : 'no')
+    );
+    $nonceMatches = is_string($claims['nonce'] ?? null) && hash_equals($idTransaction['nonce'], $claims['nonce']);
+    $record(
+        'The issued ID Token contains the nonce from its authorization request',
+        $nonceMatches,
+        'nonce matches: ' . ($nonceMatches ? 'yes' : 'no')
     );
 
     // Explicit claim-policy probes: the validator must reject altered issuer/audience values.
