@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darkside666/openid-connect-server
-          ref: main
+          ref: develop
           path: openid-connect-server
           token: ${{ secrets.LIBRARY_REPOSITORY_TOKEN || github.token }}
       - uses: shivammathur/setup-php@v2
@@ -27,7 +27,7 @@ jobs:
           coverage: none
       - name: Install dependencies
         working-directory: openid-connect-server-examples/${{ matrix.project }}
-        run: composer install --no-interaction --prefer-dist
+        run: composer update --no-interaction --prefer-dist
       - name: Test
         working-directory: openid-connect-server-examples/${{ matrix.project }}
         run: composer test
