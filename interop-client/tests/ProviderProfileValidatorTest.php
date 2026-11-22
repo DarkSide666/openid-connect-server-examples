@@ -19,12 +19,12 @@ final class ProviderProfileValidatorTest extends TestCase
             'jwks_uri' => 'https://oidc-reference.loc/jwks',
             'userinfo_endpoint' => 'https://oidc-reference.loc/userinfo',
             'response_types_supported' => ['code'],
-            'grant_types_supported' => ['authorization_code'],
+            'grant_types_supported' => ['authorization_code', 'refresh_token'],
             'response_modes_supported' => ['query'],
             'code_challenge_methods_supported' => ['S256'],
             'id_token_signing_alg_values_supported' => ['RS256'],
             'token_endpoint_auth_methods_supported' => ['client_secret_basic'],
-            'scopes_supported' => ['openid', 'profile', 'email'],
+            'scopes_supported' => ['openid', 'profile', 'email', 'offline_access'],
         ];
 
         (new ProviderProfileValidator())->validateDiscovery($metadata, 'https://oidc-reference.loc');
@@ -99,12 +99,12 @@ final class ProviderProfileValidatorTest extends TestCase
             'jwks_uri' => 'https://oidc-reference.loc/jwks',
             'userinfo_endpoint' => 'https://oidc-reference.loc/userinfo',
             'response_types_supported' => ['code'],
-            'grant_types_supported' => ['authorization_code'],
+            'grant_types_supported' => ['authorization_code', 'refresh_token'],
             'response_modes_supported' => ['query'],
             'code_challenge_methods_supported' => ['S256'],
             'id_token_signing_alg_values_supported' => ['RS256'],
             'token_endpoint_auth_methods_supported' => ['client_secret_basic'],
-            'scopes_supported' => ['openid', 'profile', 'email'],
+            'scopes_supported' => ['openid', 'profile', 'email', 'offline_access'],
         ];
     }
 }

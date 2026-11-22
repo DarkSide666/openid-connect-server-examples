@@ -33,6 +33,6 @@ final readonly class ClientRepository implements ClientRepositoryInterface
         return $clientSecret !== null
             && hash_equals($this->client->getIdentifier(), $clientIdentifier)
             && hash_equals($this->clientSecret, $clientSecret)
-            && $grantType === 'authorization_code';
+            && in_array($grantType, ['authorization_code', 'refresh_token'], true);
     }
 }

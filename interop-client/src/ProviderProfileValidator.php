@@ -19,13 +19,14 @@ final class ProviderProfileValidator
 
         $this->requireContains($metadata['response_types_supported'] ?? null, 'code', 'response_types_supported');
         $this->requireContains($metadata['grant_types_supported'] ?? null, 'authorization_code', 'grant_types_supported');
+        $this->requireContains($metadata['grant_types_supported'] ?? null, 'refresh_token', 'grant_types_supported');
         $this->requireContains($metadata['response_modes_supported'] ?? null, 'query', 'response_modes_supported');
         $this->requireContains($metadata['code_challenge_methods_supported'] ?? null, 'S256', 'code_challenge_methods_supported');
         $this->requireContains($metadata['id_token_signing_alg_values_supported'] ?? null, 'RS256', 'id_token_signing_alg_values_supported');
         $this->requireContains($metadata['token_endpoint_auth_methods_supported'] ?? null, 'client_secret_basic', 'token_endpoint_auth_methods_supported');
 
         $scopes = $metadata['scopes_supported'] ?? null;
-        foreach (['openid', 'profile', 'email'] as $scope) {
+        foreach (['openid', 'profile', 'email', 'offline_access'] as $scope) {
             $this->requireContains($scopes, $scope, 'scopes_supported');
         }
     }

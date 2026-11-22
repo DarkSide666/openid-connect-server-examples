@@ -60,7 +60,9 @@ final class ProviderFactoryTest extends TestCase
         self::assertSame('https://reference.example.test/jwks', $metadata['jwks_uri']);
         self::assertSame('https://reference.example.test/userinfo', $metadata['userinfo_endpoint']);
         self::assertSame(['code'], $metadata['response_types_supported']);
-        self::assertSame(['authorization_code'], $metadata['grant_types_supported']);
+        self::assertSame(['authorization_code', 'refresh_token'], $metadata['grant_types_supported']);
+        self::assertContains('offline_access', $metadata['scopes_supported']);
+        self::assertContains('sid', $metadata['claims_supported']);
         self::assertSame(['S256'], $metadata['code_challenge_methods_supported']);
         self::assertSame(['client_secret_basic'], $metadata['token_endpoint_auth_methods_supported']);
         self::assertSame('provider-test-client', $services['clientId']);

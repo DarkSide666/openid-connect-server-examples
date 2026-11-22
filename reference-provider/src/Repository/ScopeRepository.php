@@ -17,7 +17,7 @@ final readonly class ScopeRepository implements ScopeRepositoryInterface
     public function __construct()
     {
         $scopes = [];
-        foreach (['openid', 'profile', 'email'] as $identifier) {
+        foreach (['openid', 'profile', 'email', 'offline_access'] as $identifier) {
             $scopes[$identifier] = new Scope($identifier);
         }
 

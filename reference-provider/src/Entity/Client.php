@@ -42,6 +42,6 @@ final class Client implements ClientEntityInterface
 
     public function supportsGrantType(string $grantType): bool
     {
-        return $grantType === 'authorization_code';
+        return in_array($grantType, ['authorization_code', 'refresh_token'], true);
     }
 }

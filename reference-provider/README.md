@@ -17,12 +17,14 @@ test-only login/approval form.
 - `/token` — League token endpoint and the library's ID Token response extension.
 - `/jwks` — RS256 public signing key publication.
 - `/userinfo` — the library's Bearer-token-protected UserInfo handler.
+- `offline_access` — rotating refresh tokens, explicit consent (`prompt=consent`), single-use
+  refresh-token consumption and family revocation after reuse.
 - File-backed nonce metadata with atomic one-time consumption under a file lock.
-- File-backed access-token and authorization-code revocation markers.
+- File-backed access-token, authorization-code and refresh-token state.
 
-The only advertised grant/response profile is `authorization_code` / `code`; only `query` response
-mode, PKCE `S256`, RS256 ID Tokens and `client_secret_basic` are advertised. Refresh tokens are not
-issued. The only registered client and user are local test fixtures.
+The advertised profile is `authorization_code` / `code` with the `refresh_token` grant enabled for
+the test client. It uses `query` response mode, PKCE `S256`, RS256 ID Tokens and
+`client_secret_basic`. The only registered client and user are local test fixtures.
 
 ## Requirements
 

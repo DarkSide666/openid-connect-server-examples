@@ -17,6 +17,9 @@ use DarkSide\OpenIdConnectServer\Key\VerificationKey;
 use DarkSide\OpenIdConnectServer\League\OidcAuthCodeGrant;
 use DarkSide\OpenIdConnectServer\League\OidcAuthCodeRepository;
 use DarkSide\OpenIdConnectServer\League\OidcBearerTokenResponse;
+use DarkSide\OpenIdConnectServer\League\OidcRefreshTokenGrant;
+use DarkSide\OpenIdConnectServer\Transaction\OidcSessionIdProviderInterface;
+use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use DarkSide\OpenIdConnectServer\Token\IdTokenIssuer;
 use DarkSide\OpenIdConnectServer\Transaction\OidcRequestContext;
 use DarkSide\OpenIdConnectServer\Transaction\RequestScopedOidcContextProvider;
@@ -82,6 +85,7 @@ final readonly class ProviderFactory
         $clientRepository = new ClientRepository($clientId, $clientSecret, $redirectUri);
         $scopeRepository = new ScopeRepository();
         $revocationStore = new RevocationStore($dataDirectory . '/revoked-access-tokens.json');
+        $refreshTokenRepository = new RefreshTokenRepository(new \DarkSide\OidcReferenceProvider\Storage\RefreshTokenState($dataDirectory . '/refresh-tokens.json'));
         $accessTokenRepository = new AccessTokenRepository($revocationStore);
         $authCodeRepository = new OidcAuthCodeRepository(
             new AuthCodeRepository(new RevocationStore($dataDirectory . '/revoked-authorization-codes.json')),
@@ -138,8 +142,25 @@ final readonly class ProviderFactory
             $tokenResponse,
         );
         $authorization->enableGrantType(
-            new OidcAuthCodeGrant($authCodeRepository, new RefreshTokenRepository(), new DateInterval('PT5M'), $contextProvider),
-            new DateInterval('PT' . max(1, (int) (getenv('OIDC_REFERENCE_ACCESS_TOKEN_TTL_SECONDS') ?: 600)) . 'S'),
+            new OidcAuthCodeGrant(
+                $authCodeRepository,
+                $refreshTokenRepository,
+                new DateInterval('PT5M'),
+                $contextProvider,
+                true,
+                new class () implements OidcSessionIdProviderInterface {
+                    public function sessionId(AuthorizationRequestInterface $authorizationRequest): ?string
+                    {
+                        $sessionId = session_id();
+                        return is_string($sessionId) && $sessionId !== '' ? $sessionId : null;
+                    }
+                },
+            ),
+            $accessTokenTtl = new DateInterval('PT' . max(1, (int) (getenv('OIDC_REFERENCE_ACCESS_TOKEN_TTL_SECONDS') ?: 600)) . 'S'),
+        );
+        $authorization->enableGrantType(
+            new OidcRefreshTokenGrant($refreshTokenRepository, $contextProvider, new DateInterval('P30D')),
+            $accessTokenTtl,
         );
 
         $resourceServer = new ResourceServer($accessTokenRepository, $oauthPublicPath);
@@ -149,8 +170,10 @@ final readonly class ProviderFactory
             tokenEndpoint: $baseUrl . '/token',
             jwksUri: $baseUrl . '/jwks',
             userinfoEndpoint: $baseUrl . '/userinfo',
-            scopes: ['openid', 'profile', 'email'],
-            claims: ['iss', 'sub', 'aud', 'exp', 'iat', 'auth_time', 'nonce', 'name', 'preferred_username', 'email', 'email_verified'],
+            scopes: ['openid', 'profile', 'email', 'offline_access'],
+            claims: ['iss', 'sub', 'aud', 'exp', 'iat', 'auth_time', 'nonce', 'sid', 'name', 'preferred_username', 'email', 'email_verified'],
+            grantTypes: ['authorization_code', 'refresh_token'],
+            offlineAccessSupported: true,
             tokenEndpointAuthMethods: ['client_secret_basic'],
         );
 

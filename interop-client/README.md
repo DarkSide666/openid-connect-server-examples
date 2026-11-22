@@ -13,11 +13,13 @@ It is deliberately a separate Composer project and is not a runtime dependency o
 ## What the interoperability run covers
 
 1. Fetches and checks the provider discovery document over HTTPS.
-2. Checks the advertised Authorization Code, `S256`, RS256 and `client_secret_basic` profile.
+2. Checks the advertised Authorization Code and refresh-token grants, `offline_access`, `S256`,
+   RS256 and `client_secret_basic` profile.
 3. Fetches JWKS over HTTPS and checks that it contains an RS256 public signing key without private
    RSA parameters.
 4. Starts an Authorization Code flow using the independent RP library.
-5. Requests PKCE `S256`, `openid profile email`, state and nonce.
+5. Requests PKCE `S256`, `openid profile email`, state and nonce. The live security probes also
+   request `offline_access` with `prompt=consent`.
 6. Lets the RP library exchange the code, verify the ID Token signature using the provider JWKS,
    and validate issuer, audience, expiration, not-before and nonce when present.
 7. Additionally requires a nonce claim to be present and checks that the UserInfo `sub` exactly
@@ -203,7 +205,8 @@ composer security-checks
 
 It performs live HTTPS checks for invalid client credentials, unknown/missing authorization codes,
 unsupported grant types, unauthenticated/invalid UserInfo requests, incorrect PKCE verifiers, and
-authorization-code reuse. The authorization-flow checks require the test-only account credentials
+authorization-code reuse, and refresh-token issuance, rotation, replay rejection and family
+revocation after replay. The authorization-flow checks require the test-only account credentials
 from `reference-provider/.env` to be copied into `interop-client/.env`. See
 [`../docs/PHASE-6D-NEGATIVE-INTEROP-TESTING.md`](../docs/PHASE-6D-NEGATIVE-INTEROP-TESTING.md)
 for exact coverage and remaining limitations.

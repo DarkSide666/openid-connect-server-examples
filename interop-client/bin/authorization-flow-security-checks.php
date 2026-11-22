@@ -82,18 +82,19 @@ $authorizationEndpoint = $discovery['authorization_endpoint'];
 $tokenEndpoint = $discovery['token_endpoint'];
 
 /** @return array{code: string, verifier: string} */
-$createAuthorizationCode = static function () use ($http, $config, $username, $password, $base64Url, $verifier, $authorizationEndpoint): array {
+$createAuthorizationCode = static function (bool $offlineAccess = false) use ($http, $config, $username, $password, $base64Url, $verifier, $authorizationEndpoint): array {
     $codeVerifier = $verifier();
     $codeChallenge = $base64Url(hash('sha256', $codeVerifier, true));
     $query = http_build_query([
         'client_id' => $config->clientId,
         'response_type' => 'code',
         'redirect_uri' => $config->redirectUri,
-        'scope' => 'openid profile email',
+        'scope' => 'openid profile email' . ($offlineAccess ? ' offline_access' : ''),
         'state' => bin2hex(random_bytes(16)),
         'nonce' => bin2hex(random_bytes(16)),
         'code_challenge' => $codeChallenge,
         'code_challenge_method' => 'S256',
+        ...($offlineAccess ? ['prompt' => 'consent'] : []),
     ], '', '&', PHP_QUERY_RFC3986);
 
     $authorizationPage = $http('GET', $authorizationEndpoint . '?' . $query, ['Accept: text/html']);
@@ -168,11 +169,12 @@ try {
     $firstRedemption = $redeem($replayTransaction['code'], $replayTransaction['verifier']);
     $firstRedemptionSucceeded = $firstRedemption['status'] === 200
         && is_string($firstRedemption['payload']['access_token'] ?? null)
-        && is_string($firstRedemption['payload']['id_token'] ?? null);
+        && is_string($firstRedemption['payload']['id_token'] ?? null)
+        && !isset($firstRedemption['payload']['refresh_token']);
     $record(
         'A valid authorization code and PKCE verifier are accepted once',
         $firstRedemptionSucceeded,
-        'HTTP ' . $firstRedemption['status'] . '; access token and ID Token issued: ' . ($firstRedemptionSucceeded ? 'yes' : 'no'),
+        'HTTP ' . $firstRedemption['status'] . '; access token and ID Token issued without an unrequested refresh token: ' . ($firstRedemptionSucceeded ? 'yes' : 'no'),
     );
 
     if ($firstRedemptionSucceeded) {
@@ -188,6 +190,63 @@ try {
         );
     } else {
         $record('Token endpoint rejects reuse of a redeemed authorization code', false, 'Skipped because initial valid redemption failed.');
+    }
+
+    $offlineTransaction = $createAuthorizationCode(true);
+    $offlineTokens = $redeem($offlineTransaction['code'], $offlineTransaction['verifier']);
+    $initialRefreshToken = $offlineTokens['payload']['refresh_token'] ?? null;
+    $offlineSucceeded = $offlineTokens['status'] === 200
+        && is_string($offlineTokens['payload']['access_token'] ?? null)
+        && is_string($initialRefreshToken)
+        && $initialRefreshToken !== '';
+    $record(
+        'Explicitly consented offline_access authorization issues a refresh token',
+        $offlineSucceeded,
+        'HTTP ' . $offlineTokens['status'] . '; refresh token issued: ' . ($offlineSucceeded ? 'yes' : 'no'),
+    );
+
+    if ($offlineSucceeded) {
+        $refresh = static function (string $token) use ($http, $tokenEndpoint, $formHeaders): array {
+            $response = $http('POST', $tokenEndpoint, $formHeaders, http_build_query([
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $token,
+            ], '', '&', PHP_QUERY_RFC3986));
+            $payload = json_decode($response['body'], true);
+            return ['status' => $response['status'], 'payload' => is_array($payload) ? $payload : []];
+        };
+        $rotated = $refresh($initialRefreshToken);
+        $replacement = $rotated['payload']['refresh_token'] ?? null;
+        $rotationSucceeded = $rotated['status'] === 200 && is_string($replacement)
+            && $replacement !== '' && !hash_equals($initialRefreshToken, $replacement);
+        $record(
+            'Refresh-token grant rotates the token after successful client authentication',
+            $rotationSucceeded,
+            'HTTP ' . $rotated['status'] . '; replacement token issued: ' . ($rotationSucceeded ? 'yes' : 'no'),
+        );
+
+        $replay = $refresh($initialRefreshToken);
+        $replayRejected = $replay['status'] === 400 && ($replay['payload']['error'] ?? null) === 'invalid_grant';
+        $record(
+            'Refresh-token reuse is rejected',
+            $replayRejected,
+            'HTTP ' . $replay['status'] . '; OAuth error: ' . (is_string($replay['payload']['error'] ?? null) ? $replay['payload']['error'] : 'missing'),
+        );
+
+        if ($rotationSucceeded) {
+            $familyCheck = $refresh($replacement);
+            $familyRevoked = $familyCheck['status'] === 400 && ($familyCheck['payload']['error'] ?? null) === 'invalid_grant';
+            $record(
+                'Reusing a spent refresh token revokes its replacement token family',
+                $familyRevoked,
+                'Replacement token after replay: HTTP ' . $familyCheck['status'] . '; OAuth error: ' . (is_string($familyCheck['payload']['error'] ?? null) ? $familyCheck['payload']['error'] : 'missing'),
+            );
+        } else {
+            $record('Reusing a spent refresh token revokes its replacement token family', false, 'Skipped because initial rotation failed.');
+        }
+    } else {
+        $record('Refresh-token grant rotates the token after successful client authentication', false, 'Skipped because offline access did not issue a refresh token.');
+        $record('Refresh-token reuse is rejected', false, 'Skipped because offline access did not issue a refresh token.');
+        $record('Reusing a spent refresh token revokes its replacement token family', false, 'Skipped because offline access did not issue a refresh token.');
     }
 } catch (Throwable $exception) {
     fwrite(STDERR, 'Authorization-flow security checks could not complete: ' . $exception->getMessage() . "\n");

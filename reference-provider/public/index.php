@@ -101,11 +101,12 @@ $app->get('/authorize', static function ($request, $response) use ($services, $c
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>OIDC Reference Provider Login</title></head>
 <body><h1>Test OpenID Provider</h1><p><strong>Test-only reference provider.</strong></p>
 <p>Client: {$clientName}</p><p>Requested scopes: {$scopeText}</p>
+<p>The offline_access scope grants this test client a rotating refresh token after explicit approval.</p>
 <form method="post" action="/authorize">
 <input type="hidden" name="csrf_token" value="{$token}">
 <label>Username <input name="username" autocomplete="username" required></label><br>
 <label>Password <input type="password" name="password" autocomplete="current-password" required></label><br>
-<label><input type="checkbox" name="approve" value="1" checked> Approve this test authorization</label><br>
+<label><input type="checkbox" name="approve" value="1"> Approve this test authorization</label><br>
 <button type="submit">Continue</button></form></body></html>
 HTML;
         $response->getBody()->write($html);
@@ -145,6 +146,8 @@ $app->post('/authorize', static function ($request, $response) use ($services, $
     }
 
     session_regenerate_id(true);
+    $_SESSION['oidc_sid'] = session_id();
+    $_SESSION['oidc_subject'] = 'reference-user-subject-001';
     $services['authenticationTimeStore']->recordSuccessfulLogin();
     $authorizationRequest->setUser(new User('reference-user-001'));
     $authorizationRequest->setAuthorizationApproved(($body['approve'] ?? null) === '1');
